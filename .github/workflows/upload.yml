@@ -1,0 +1,122 @@
+name: YouTube Video Upload
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      confirm:
+        description: 'Type YES to confirm upload'
+        required: true
+        default: 'NO'
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📦 Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 🔍 Check Files
+        run: |
+          echo "📋 Checking required files..."
+          
+          if [ ! -f "youtube_token.pickle" ]; then
+            echo "❌ youtube_token.pickle not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "videos.txt" ]; then
+            echo "❌ videos.txt not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "uploader.py" ]; then
+            echo "❌ uploader.py not found!"
+            exit 1
+          fi
+          
+          echo "✅ All required files present"
+          
+          echo ""
+          echo "📊 Video Links Count:"
+          grep -v '^#' videos.txt | grep -v '^$' | wc -l
+          
+          echo ""
+          echo "📂 Repository Files:"
+          ls -lh
+      
+      - name: 🚀 Run Upload
+        if: github.event.inputs.confirm == 'YES'
+        run: |
+          echo "🎬 Starting upload process..."
+          echo ""
+          python uploader.py
+        env:
+          PYTHONUNBUFFERED: 1
+      
+      - name: ⚠️ Upload Skipped
+        if: github.event.inputs.confirm != 'YES'
+        run: |
+          echo "⚠️ Upload cancelled - confirmation required"
+          echo "💡 Set 'confirm' to 'YES' to proceed"
+          exit 1
+      
+      - name: 💾 Save Progress
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upload-tracker
+          path: |
+            tracker.json
+            ip_log_*.txt
+          retention-days: 90
+      
+      - name: 📊 Upload Summary
+        if: always()
+        run: |
+          echo "## 📊 Upload Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "tracker.json" ]; then
+            echo "### Progress:" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat tracker.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No tracker file found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "🔄 Next run: Click 'Run workflow' button again" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 📤 Commit Progress (Optional)
+        if: success()
+        continue-on-error: true
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Add tracker and updated videos.txt
+          if [ -f "tracker.json" ]; then
+            git add tracker.json
+          fi
+          
+          if [ -f "videos.txt" ]; then
+            git add videos.txt
+          fi
+          
+          # Commit if there are changes
+          git diff --staged --quiet || git commit -m "📊 Update progress & clean videos.txt [skip ci]"
+          git push
